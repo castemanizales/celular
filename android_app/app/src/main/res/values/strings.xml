@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AutoCall Server</string>
+    <string name="server_title">Servidor de Llamadas HTTP</string>
+    <string name="btn_start_server">INICIAR SERVIDOR</string>
+    <string name="btn_stop_server">DETENER SERVIDOR</string>
+    <string name="btn_test_call">PROBAR 3 LLAMADAS AHORA</string>
+    <string name="num1_hint">Número 1 (ej: +573001234567)</string>
+    <string name="num2_hint">Número 2 (ej: +573007654321)</string>
+    <string name="num3_hint">Número 3 (ej: +573109876543)</string>
+</resources>
