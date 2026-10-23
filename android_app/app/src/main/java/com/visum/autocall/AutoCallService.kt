@@ -44,8 +44,20 @@ class AutoCallService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification("Iniciando servicio de llamadas...")
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            val notification = buildNotification("Iniciando servicio de llamadas...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } catch (e: Exception) {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Prevenir cierre forzoso por restricciones de Foreground Service o notificaciones en Android 12+
+        }
 
         startServer()
 
@@ -93,8 +105,9 @@ class AutoCallService : Service() {
     }
 
     fun triggerCalls(customNumbers: List<String> = emptyList()) {
+        wakeUpScreen()
         val prefs = getSharedPreferences("autocall_prefs", Context.MODE_PRIVATE)
-        val ringSeconds = prefs.getInt("ring_duration", 22)
+        val ringSeconds = prefs.getInt("ring_duration", 12)
 
         val targetList = if (customNumbers.isNotEmpty()) {
             customNumbers
@@ -107,6 +120,22 @@ class AutoCallService : Service() {
         }
 
         callEngine.startCallSequence(targetList, ringSeconds)
+    }
+
+    private fun wakeUpScreen() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val screenLock = powerManager.newWakeLock(
+                PowerManager.FULL_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE,
+                "AutoCall::WakeUpScreen"
+            )
+            screenLock.acquire(3000L)
+        } catch (e: Exception) {
+            // Ignore
+        }
     }
 
     fun stopCallSequence() {

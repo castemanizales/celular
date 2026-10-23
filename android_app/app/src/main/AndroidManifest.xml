@@ -18,9 +18,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@drawable/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AutoCallServer"
         android:usesCleartextTraffic="true">
@@ -40,7 +40,11 @@
             android:name=".AutoCallService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse|dataSync" />
+            android:foregroundServiceType="specialUse|dataSync">
+            <property
+                android:name="android.app.property.FOREGROUND_SERVICE_TYPE_SPECIAL_USE"
+                android:value="Mantener el servidor HTTP local activo y coordinar llamadas automáticas en segundo plano." />
+        </service>
 
     </application>
 

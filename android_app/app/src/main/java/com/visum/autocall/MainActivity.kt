@@ -93,7 +93,7 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.READ_PHONE_STATE
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             permissionsToRequest.add(Manifest.permission.ANSWER_PHONE_CALLS)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

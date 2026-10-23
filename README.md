@@ -1,25 +1,26 @@
 # AutoCall Server - Sistema de Llamadas Automáticas vía HTTP Local
 
-Este proyecto permite controlar un celular Android desde un computador conectado a la misma red Wi-Fi para realizar **3 llamadas automáticas consecutivas** a números preestablecidos (o a un número específico enviado por parámetro), dejando timbrar aproximadamente 5 veces (~22 segundos) antes de pasar automáticamente a la siguiente llamada.
+Este proyecto permite controlar un celular Android desde un computador o cualquier dispositivo conectado a la misma red Wi-Fi para realizar **llamadas automáticas consecutivas** a números preestablecidos (o a un número específico enviado por parámetro HTTP), dejando timbrar el tiempo configurado y colgando/avanzando automáticamente entre cada una.
 
 ---
 
-## 📋 Arquitectura del Proyecto
+## 📋 Arquitectura y Novedades del Sistema
 
-1. **Servidor HTTP en Android (Foreground Service):**
-   - Corre dentro de un servicio en segundo plano persistente con `WakeLock` y `WifiLock` para que el sistema operativo no lo detenga.
+1. **Servidor HTTP Local en Android (Foreground Service):**
+   - Corre dentro de un servicio en primer plano persistente con `WakeLock` y `WifiLock` para evitar que el sistema operativo lo congele o cierre.
    - Escucha en el puerto `8080` de la red Wi-Fi local (ej: `http://192.168.1.50:8080`).
-   - Dispone de endpoints HTTP (`/llamar`, `/status`, `/detener`).
+   - Totalmente adaptado para **Android 14 (API 34)** con tipo de servicio en primer plano `dataSync` / `specialUse`.
+   - **Panel web interactivo integrado:** Al acceder a la raíz (`http://<IP_CELULAR>:8080/`) desde cualquier navegador web se muestra una interfaz visual para probar llamadas y consultar el estado rápidamente.
 
-2. **Motor de Llamadas (`CallEngine.kt`):**
-   - Utiliza `Intent.ACTION_CALL` para marcar directamente a la red móvil.
-   - Cuenta el tiempo de timbrado (~5 timbres = 22 segundos configurables).
-   - Corta la llamada automáticamente usando `TelecomManager.endCall()` o detecta cuando finaliza para avanzar.
-   - Realiza una breve pausa de enfriamiento (3 segundos) entre llamadas para que el módem telefónico se reinicie correctamente antes del siguiente número.
+2. **Motor de Llamadas Inteligente (`CallEngine.kt`):**
+   - Ejecuta llamadas telefónicas directas mediante `Intent.ACTION_CALL`.
+   - **Detección activa del estado de llamada (`TelephonyManager.callState`):** Monitorea la línea telefónica en tiempo real. Si la llamada es finalizada por el destinatario, cae a buzón o se cuelga antes del tiempo máximo, la app lo detecta de inmediato y avanza a la siguiente llamada sin tiempos muertos innecesarios.
+   - **Cuelgue automático:** Al alcanzar el tiempo máximo de timbrado configurado (por defecto 12s, ajustable en la app o código), cuelga mediante `TelecomManager.endCall()`.
+   - **Enfriamiento optimizado:** Aplica una pausa breve de 1.5 segundos entre llamadas para permitir que el módem celular y la red móvil se restablezcan correctamente.
 
-3. **Cliente de Control en Computador (`client_test.py`):**
-   - Script en Python ejecutado dentro del entorno virtual creado en este repositorio.
-   - Se comunica con el celular mediante `requests`.
+3. **Cliente de Control en Computador:**
+   - Script interactivo en Python ([client_test.py](file:///c:/Users/lavoz/Documents/ANTIGRAVITY/visum/celular/client_test.py)) con entorno virtual listo (`venv/`).
+   - Compatible con cualquier lenguaje o herramienta HTTP (`curl`, `requests`, PowerShell `Invoke-RestMethod`, Postman, etc.).
 
 ---
 
@@ -29,124 +30,169 @@ Este proyecto permite controlar un celular Android desde un computador conectado
 celular/
 │
 ├── .gitignore                   # Exclusiones de Git (venv, temporales, gradle, build)
-├── README.md                    # Esta documentación paso a paso
-├── client_test.py               # Script cliente en Python para enviar peticiones HTTP
+├── README.md                    # Documentación detallada del proyecto
+├── client_test.py               # Script cliente en Python para pruebas y automatización
 ├── venv/                        # Entorno virtual de Python configurado
 │
-└── android_app/                 # Proyecto completo de Android Studio
-    ├── build.gradle             # Configuración raíz de Gradle
-    ├── settings.gradle          # Inclusión del módulo :app
-    ├── gradle.properties        # Propiedades de compilación
+└── android_app/                 # Proyecto de Android Studio (Target SDK 34, Gradle 8.13)
+    ├── build.gradle             # Configuración raíz de Gradle (AGP 8.13.2, Kotlin 1.9.24)
+    ├── settings.gradle          # Módulos del proyecto
+    ├── gradle.properties        # Opciones JVM y rutas
     ├── local.properties         # Ruta al SDK de Android
     └── app/
-        ├── build.gradle         # Dependencias AndroidX, Material 3 y Coroutines
+        ├── build.gradle         # Configuración del módulo de la aplicación
+        ├── build/outputs/apk/   # Binarios APK compilados listos para instalar
+        │   └── debug/app-debug.apk
         └── src/main/
-            ├── AndroidManifest.xml   # Permisos de llamada, red y servicio
+            ├── AndroidManifest.xml   # Permisos de llamada, red y Foreground Service
             ├── java/com/visum/autocall/
-            │   ├── MainActivity.kt    # Interfaz visual, permisos y consola en vivo
-            │   ├── AutoCallService.kt # Servicio HTTP en primer plano
-            │   ├── CallEngine.kt      # Lógica secuencial de llamadas y timbrado
-            │   ├── LocalHttpServer.kt # Servidor HTTP socket embebido
-            │   └── NetworkUtils.kt    # Utilidad para detectar IP Wi-Fi
-            └── res/                   # Layouts, temas oscuros y recursos
+            │   ├── MainActivity.kt    # Interfaz visual, gestión de permisos y consola en vivo
+            │   ├── AutoCallService.kt # Servicio en primer plano y ciclo de vida
+            │   ├── CallEngine.kt      # Motor secuencial de llamadas y monitoreo de línea
+            │   ├── LocalHttpServer.kt # Servidor HTTP socket multihilo y endpoints
+            │   └── NetworkUtils.kt    # Detección automática de la IP Wi-Fi
+            └── res/                   # Layouts, temas oscuros e iconos de la app
 ```
 
 ---
 
-## 🚀 Pasos Realizados en el Proyecto
+## 🌐 Endpoints de la API HTTP
 
-### 1. Inicialización de Git y Entorno Virtual
-- Se inicializó el repositorio Git en la carpeta raíz (`git init`).
-- Se configuró el archivo `.gitignore` para ignorar archivos binarios y entornos.
-- Se creó el entorno virtual de Python en la carpeta `venv/`.
-- Se instaló la librería `requests` dentro de `venv/` para realizar las pruebas.
+El servidor expone los siguientes endpoints en `http://<IP_CELULAR>:8080`:
 
-### 2. Construcción de la App Android
-- Se implementó la interfaz moderna (tema oscuro) con:
-  - Tarjeta de estado del servidor y botón Iniciar/Detener.
-  - Campos para configurar los 3 números telefónicos predeterminados.
-  - Campo para ajustar los segundos de timbrado (por defecto 22 segundos, ~5 timbres).
-  - Consola de eventos en vivo que muestra peticiones HTTP y progreso de llamadas.
-- Se configuraron los permisos necesarios en `AndroidManifest.xml`:
-  - `android.permission.CALL_PHONE`: Para lanzar llamadas sin intervención manual.
-  - `android.permission.READ_PHONE_STATE`: Para monitorear el estado de la línea.
-  - `android.permission.ANSWER_PHONE_CALLS`: Para colgar automáticamente al cumplirse los 5 timbres.
-  - `android.permission.FOREGROUND_SERVICE`: Para mantener el servidor activo en segundo plano.
-  - `android.permission.INTERNET` y `ACCESS_WIFI_STATE`: Para el servidor HTTP local.
+| Método | Endpoint | Parámetros | Descripción |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/` | Ninguno | Panel web HTML para comprobar conectividad y ejecutar pruebas desde el navegador. |
+| `GET` | `/status` | Ninguno | Retorna el estado en JSON: `{"running": true, "calling": false}`. |
+| `GET` | `/llamar` | Ninguno | Inicia la secuencia de las 3 llamadas predeterminadas guardadas en la app. |
+| `GET` | `/llamar` | `numero=+573001234567` | Realiza una llamada al número especificado en el parámetro. |
+| `GET` | `/llamar` | `numero1=...&numero2=...&numero3=...` | Realiza la secuencia a los números pasados en la URL. |
+| `GET` | `/detener` | Ninguno | Cancela la secuencia actual y cuelga de inmediato la llamada en curso. |
 
 ---
 
-## 📱 Cómo Compilar e Instalar la App en el Celular
+## 📱 Instalación y Configuración de la App en el Celular
 
-### Opción A: Desde Android Studio
+### Opción 1: Instalar directamente el APK precompilado (Más rápido)
+El repositorio ya cuenta con el APK listo para instalar en:
+`android_app/app/build/outputs/apk/debug/app-debug.apk`
+
+- **Vía cable USB con ADB:**
+  ```powershell
+  adb install -r android_app/app/build/outputs/apk/debug/app-debug.apk
+  ```
+- **O copiando el archivo:** Transfiere el archivo `app-debug.apk` a tu celular por WhatsApp, Drive, Telegram o cable USB y pulsa sobre él para instalarlo.
+
+### Opción 2: Compilar desde Android Studio
 1. Abre **Android Studio**.
-2. Selecciona **Open** y navega a la carpeta `android_app`.
-3. Conecta tu celular por cable USB con la **Depuración USB** activada (o usa emparejamiento Wi-Fi ADB).
-4. Presiona el botón **Run** (ícono verde de reproducir) para compilar e instalar la app directamente.
-
-### Opción B: Permisos en el Celular
-Al abrir la app por primera vez:
-1. Acepta los permisos de **Teléfono / Realizar llamadas** y **Notificaciones**.
-2. Ingresa los 3 números preestablecidos en la pantalla y pulsa **GUARDAR**.
-3. Pulsa el botón **INICIAR SERVIDOR**.
-4. La pantalla mostrará la URL local del celular, por ejemplo:
-   ```text
-   http://192.168.1.50:8080
-   ```
-*(Asegúrate de que el celular esté conectado a la misma red Wi-Fi que el computador).*
-
-> **Recomendación para segundo plano:**  
-> Ve a la configuración de aplicaciones de Android -> **AutoCall Server** -> **Batería** -> Selecciona **"Sin restricciones"** (evita que el sistema duerma el servidor HTTP).
+2. Selecciona **Open** y elige la carpeta `android_app`.
+3. Conecta tu celular con la **Depuración USB** activada.
+4. Presiona el botón verde **Run** (`Shift + F10`) para compilar e instalar.
 
 ---
 
-## 💻 Cómo Usar desde el Computador
+### ⚙️ Permisos y Configuración Inicial en el Celular
 
-### 1. Activar el Entorno Virtual de Python
-Abre una terminal PowerShell o CMD en esta carpeta:
+1. **Permisos al abrir la app:**
+   - **Teléfono / Realizar y gestionar llamadas:** Necesario para marcar (`CALL_PHONE`).
+   - **Estado del teléfono:** Necesario para detectar cuándo cuelgan o se corta la llamada (`READ_PHONE_STATE`).
+   - **Control de llamadas (Android 9+):** Permiso para colgar automáticamente al cumplirse el tiempo (`ANSWER_PHONE_CALLS`).
+   - **Notificaciones (Android 13+):** Necesario para mantener el servicio activo en segundo plano (`POST_NOTIFICATIONS`).
+
+2. **Configuración de números:**
+   - Ingresa los números telefónicos deseados en los campos de la interfaz.
+   - Ajusta los segundos máximos de timbrado (por defecto 12s o 22s según la necesidad).
+   - Presiona **GUARDAR CONFIGURACIÓN**.
+
+3. **Iniciar el servidor:**
+   - Presiona el botón **INICIAR SERVIDOR**.
+   - En pantalla aparecerá la URL asignada, por ejemplo: `http://192.168.1.50:8080`.
+
+4. **Optimización de Batería (Crítico para segundo plano):**
+   - Ve a **Ajustes de Android** -> **Aplicaciones** -> **AutoCall Server**.
+   - En **Batería**, selecciona la opción **"Sin restricciones"** (Unrestricted).
+   - Esto garantiza que el servidor HTTP siga respondiendo aunque la pantalla se apague.
+
+---
+
+## 💻 Cómo Controlar y Realizar Llamadas desde el Computador
+
+Asegúrate de que el computador y el celular estén conectados a la **misma red Wi-Fi**.
+
+### 1. Usar el Script en Python (`client_test.py`)
+
+Abre una terminal PowerShell o CMD en la carpeta raíz del proyecto:
 
 ```powershell
+# 1. Activar el entorno virtual:
 .\venv\Scripts\activate
-```
 
-### 2. Ejecutar Petición con el Script Incluido
-Puedes disparar la llamada con el script `client_test.py`:
-
-```powershell
-# Llamar a los 3 números preestablecidos en la app:
+# 2. Ejecutar prueba hacia la IP del celular:
+# Llama a los 3 números predeterminados en la app:
 python client_test.py 192.168.1.50
 
-# O llamar a un número específico:
+# O llamar a un número en particular:
 python client_test.py 192.168.1.50 +573001234567
 ```
 
-### 3. Ejecutar desde tu propio código Python
-Tal como lo requieres:
+### 2. Integrar en tu propio código Python
 
 ```python
 import requests
 
-# Reemplaza con la IP que muestra la pantalla del celular
-ip_celular = "192.168.1.50"
-numero = "+123456789"
+IP_CELULAR = "192.168.1.50"
+BASE_URL = f"http://{IP_CELULAR}:8080"
 
-# Opción 1: Disparar las 3 llamadas preestablecidas
-response = requests.get(f"http://{ip_celular}:8080/llamar")
-print(response.json())
+# 1. Verificar estado del servidor
+status = requests.get(f"{BASE_URL}/status", timeout=3).json()
+print("Estado del servidor:", status)
 
-# Opción 2: Pasar un número específico
-response = requests.get(f"http://{ip_celular}:8080/llamar?numero={numero}")
-print(response.json())
+# 2. Opción A: Disparar llamadas a la lista preestablecida
+resp = requests.get(f"{BASE_URL}/llamar", timeout=5)
+print(resp.json())
+
+# 2. Opción B: Disparar llamada a un número específico
+numero = "+573001234567"
+resp = requests.get(f"{BASE_URL}/llamar?numero={numero}", timeout=5)
+print(resp.json())
+
+# 3. Detener secuencia si es necesario
+# requests.get(f"{BASE_URL}/detener", timeout=5)
 ```
 
-### 4. Consultar Estado en Cualquier Momento
-```bash
-curl http://192.168.1.50:8080/status
-```
-Responde con un JSON indicando si el servidor está en línea y si está ejecutando llamadas en ese instante.
+### 3. Usar desde Terminal / Consola (cURL o PowerShell)
 
-### 5. Detener Secuencia en Curso
-```bash
-curl http://192.168.1.50:8080/detener
-```
-Cancela la secuencia y cuelga de inmediato.
+- **Consultar estado:**
+  ```bash
+  curl http://192.168.1.50:8080/status
+  ```
+
+- **Disparar llamadas preestablecidas:**
+  ```bash
+  curl http://192.168.1.50:8080/llamar
+  ```
+
+- **Llamar a un número específico:**
+  ```bash
+  curl "http://192.168.1.50:8080/llamar?numero=%2B573001234567"
+  ```
+
+- **En PowerShell nativo (sin herramientas externas):**
+  ```powershell
+  Invoke-RestMethod -Uri "http://192.168.1.50:8080/llamar"
+  ```
+
+- **Detener llamadas en curso:**
+  ```bash
+  curl http://192.168.1.50:8080/detener
+  ```
+
+---
+
+## 🛠️ Tecnologías y Dependencias
+
+- **Android SDK:** `minSdk: 26 (Android 8.0)`, `compileSdk / targetSdk: 34 (Android 14)`.
+- **Gradle:** Gradle 8.13 y Android Gradle Plugin 8.13.2.
+- **Kotlin:** 1.9.24 con Coroutines (`kotlinx-coroutines-android`).
+- **Arquitectura:** Foreground Service multihilo con ServerSocket nativo, TelecomManager y TelephonyManager.
+- **Python:** 3.10+ con librería `requests`.

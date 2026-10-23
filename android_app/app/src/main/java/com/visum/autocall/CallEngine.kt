@@ -5,8 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.telecom.TelecomManager
-import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -21,16 +21,15 @@ class CallEngine(
 
     private val isExecuting = AtomicBoolean(false)
     private var currentJob: Job? = null
-    private val callFinishedSignal = CompletableDeferred<Unit>()
 
     fun isRunning(): Boolean = isExecuting.get()
 
     /**
      * Inicia la secuencia de llamadas a la lista de numeros provista
      * @param numbers Lista con los números telefónicos
-     * @param ringTimeoutSecs Segundos máximos para dejar timbrar (~22 seg para 5 timbres)
+     * @param ringTimeoutSecs Segundos máximos para dejar timbrar (por defecto 12s)
      */
-    fun startCallSequence(numbers: List<String>, ringTimeoutSecs: Int = 22) {
+    fun startCallSequence(numbers: List<String>, ringTimeoutSecs: Int = 12) {
         if (isExecuting.getAndSet(true)) {
             onLog("[!] Ya hay una secuencia de llamadas en curso. Ignorando nueva solicitud.")
             return
@@ -46,7 +45,7 @@ class CallEngine(
 
                 onLog("==========================================")
                 onLog("[*] INICIANDO SECUENCIA: ${cleanList.size} llamada(s)")
-                onLog("[*] Tiempo de timbrado configurado: ${ringTimeoutSecs}s (~5 timbres)")
+                onLog("[*] Tiempo máx. de timbrado: ${ringTimeoutSecs}s por número")
                 onLog("==========================================")
 
                 for ((index, number) in cleanList.withIndex()) {
@@ -62,33 +61,24 @@ class CallEngine(
                         continue
                     }
 
-                    // 2. Esperar que transcurra el tiempo de timbrado o que cuelguen
-                    onLog("[*] Esperando timbrado (máx ${ringTimeoutSecs}s)...")
-                    withTimeoutOrNull(ringTimeoutSecs * 1000L) {
-                        // Esperar hasta que termine o se agote el tiempo
-                        val pollInterval = 1000L
-                        var elapsed = 0
-                        while (elapsed < ringTimeoutSecs && isActive) {
-                            delay(pollInterval)
-                            elapsed++
-                            if (elapsed % 5 == 0) {
-                                onLog("    ... timbrando (${elapsed}s / ${ringTimeoutSecs}s)")
-                            }
-                        }
-                    }
+                    // Breve pausa inicial para que el marcador procese la llamada
+                    delay(1500L)
 
-                    // 3. Colgar la llamada si aun sigue timbrando
-                    onLog("[*] Tiempo de timbrado cumplido. Procediendo a colgar...")
+                    // 2. Esperar a que la llamada termine y el marcador se estabilice
+                    onLog("[*] Esperando finalización de llamada...")
+                    waitForCallCompletion(ringTimeoutSecs)
+
+                    // 3. Colgar por seguridad
                     hangUpCall()
 
-                    // 4. Pausa de enfriamiento entre llamadas (3 segundos)
+                    // 4. Pausa de enfriamiento entre llamadas (2 segundos para asegurar cierre del dialer)
                     if (callNumber < cleanList.size) {
-                        onLog("[*] Esperando 3 segundos antes de la siguiente llamada...")
-                        delay(3000L)
+                        onLog("[*] Esperando 2s antes de la siguiente llamada...")
+                        delay(2000L)
                     }
                 }
 
-                onLog("\n[+] SECUENCIA COMPLETADA: Se finalizaron todas las llamadas.")
+                onLog("\n[+] SECUENCIA COMPLETADA: Se procesaron todas las llamadas.")
             } catch (e: CancellationException) {
                 onLog("[!] Secuencia de llamadas cancelada por el usuario.")
             } catch (e: Exception) {
@@ -101,21 +91,68 @@ class CallEngine(
     }
 
     /**
-     * Lanza el Intent para llamar directamente al numero
+     * Espera activamente hasta que el estado del teléfono regrese a IDLE (llamada finalizada) y se estabilice.
+     */
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private suspend fun waitForCallCompletion(maxTimeoutSecs: Int) {
+        val timeoutMs = maxTimeoutSecs * 1000L
+        val startTime = System.currentTimeMillis()
+        val pollInterval = 500L
+        var stateDetected = false
+
+        while (System.currentTimeMillis() - startTime < timeoutMs && currentCoroutineContext().isActive) {
+            val state = try {
+                telephonyManager.callState
+            } catch (e: Exception) {
+                TelephonyManager.CALL_STATE_IDLE
+            }
+
+            if (state == TelephonyManager.CALL_STATE_OFFHOOK || state == TelephonyManager.CALL_STATE_RINGING) {
+                stateDetected = true
+            } else if (state == TelephonyManager.CALL_STATE_IDLE && stateDetected) {
+                onLog("[*] Llamada finalizada detectada. Estabilizando marcador...")
+                // Esperar 1.5s adicionales en IDLE para asegurar que la app nativa de llamadas se cierre completamente
+                delay(1500L)
+                break
+            }
+
+            delay(pollInterval)
+        }
+    }
+
+    /**
+     * Realiza la llamada utilizando TelecomManager (soporta bloqueo de pantalla y segundo plano) con fallback a Intent
      */
     @SuppressLint("MissingPermission")
     private fun makeSingleCall(number: String): Boolean {
         return try {
             val clean = number.trim()
             val uri = Uri.parse("tel:${Uri.encode(clean)}")
+
+            // TelecomManager.placeCall permite realizar llamadas en segundo plano o con pantalla bloqueada
+            if (telecomManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    val extras = Bundle().apply {
+                        putBoolean(TelecomManager.EXTRA_START_CALL_WITH_SPEAKERPHONE, false)
+                    }
+                    telecomManager.placeCall(uri, extras)
+                    onLog("[+] Marcando (TelecomManager): $clean")
+                    return true
+                } catch (e: Exception) {
+                    onLog("[*] placeCall falló (${e.message}), usando Intent...")
+                }
+            }
+
+            // Fallback a Intent ACTION_CALL
             val callIntent = Intent(Intent.ACTION_CALL, uri).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             context.startActivity(callIntent)
-            onLog("[+] Marcando: $clean")
+            onLog("[+] Marcando (Intent): $clean")
             true
         } catch (e: Exception) {
-            onLog("[-] Falló startActivity(ACTION_CALL): ${e.localizedMessage}")
+            onLog("[-] Falló la realización de llamada: ${e.localizedMessage}")
             false
         }
     }
